@@ -1,14 +1,14 @@
-# Rescaling EBS volumes programatically
+# Rescaling EBS volumes programmatically
 
-This code sample is discussed in thetail in this AWS [Blog Post](https://aws.amazon.com/es/blogs/aws-spanish/).
+This code sample is discussed in detail in this AWS [Blog Post](https://aws.amazon.com/es/blogs/aws-spanish/).
 
 ### Usage
 
-#### Prerequisites
+#### Pre-requisites
 
-- An AWS Account
-- An EB2 volume attached to an EC2 instance
-- IAM Privileges to deploy the components of this solution
+- An AWS Account.
+- An EB2 volume attached to an EC2 instance.
+- IAM Privileges to deploy the components of this solution.
 
 #### Deployment
 
@@ -17,9 +17,7 @@ This code sample is discussed in thetail in this AWS [Blog Post](https://aws.ama
 2 - Proceed with the following commands in the terminal.
 
 ```
-aaa
-bbb
-ccc
+aws cloudformation create-stack  --stack-name RescaleEBSIOPs --template-body file://rescale-ebs-iops.yaml
 ```
 
 3 - Validate the deployment.
@@ -31,14 +29,12 @@ In order to delete all the components deployed within this solution and so avoid
 1 - Run the following commands in your terminal:
 
 ```
-aaa
-bbb
-ccc
+aws cloudformation delete-stack  --stack-name RescaleEBSIOPs
 ```
 
-2 - (Optionally) Open the EC2 console and identify/delete unnecessary EBS snapshots created by this solution (they are tagged as XXX).
+2 - (Optional) Open the EC2 console and identify/delete unnecessary EBS snapshots created by this solution (they are tagged as 'Rescale IOPs snapshot').
 
-3 - (Optionally) Delete CloudWatch log streams: /aaa/bbb/ccc.
+3 - (Optional) Delete CloudWatch log streams: /aws/lambda/RescaleEBS-\*
 
 ## Security
 
