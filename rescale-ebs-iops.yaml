@@ -1,0 +1,332 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Step Functions state machine.
+  
+  This machine takes care of modifying an attached EBS volume, so that the
+  volume is converted to the given type and IOPs capacity (when applicable).
+  
+  To invoke the state machine, pass the following JSON object:
+   
+  {
+    "parameters": {
+      "instance_id": "i-xxxxxxxxxxxxxxxxx",
+      "volume_id": "vol-yyyyyyyyyyyyyyyyy",
+      "volume_type": "io1",
+      "volume_iops": "400"
+    }
+  }
+   
+  NB: volume_iops must be "" when volume_type is not in ['io1', 'io2']:
+   
+  {
+    "parameters": {
+      "instance_id": "i-xxxxxxxxxxxxxxxxx",
+      "volume_id": "vol-yyyyyyyyyyyyyyyyy",
+      "volume_type": "gp2",
+      "volume_iops": ""
+    }
+  }
+Resources:
+  RescaleEBSIOPs:
+    Type: 'AWS::StepFunctions::StateMachine'
+    Properties:
+      DefinitionString: !Sub |
+        {
+          "Comment": "RescaleEBSIOPs",
+          "StartAt": "Configure",
+          "States": {
+            "Configure": {
+              "Type": "Pass",
+              "Parameters": {
+                "instance_id.$": "$.parameters.instance_id",
+                "volume_id.$": "$.parameters.volume_id",
+                "volume_type.$": "$.parameters.volume_type",
+                "volume_iops.$": "$.parameters.volume_iops",
+                "loop_count": 0,
+                "max_loops": 60,
+                "context": {}
+              },
+              "ResultPath": "$.context",
+              "Next": "CreateEBSSnap"
+            },
+            "CreateEBSSnap": {
+              "Type": "Task",
+              "Resource": "${CreateEBSSnap.Arn}",
+              "ResultPath": "$.context",
+              "Next": "GetEBSSnapState"
+            },
+            "GetEBSSnapState": {
+              "Type": "Task",
+              "Resource": "${GetEBSSnapState.Arn}",
+              "ResultPath": "$.context",
+              "Next": "CheckEBSSnapState"
+            },
+            "CheckEBSSnapState": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.context.snapshot_state",
+                  "StringEquals": "completed",
+                  "Next": "ModifyEBSVol"
+                },
+                {
+                  "Variable": "$.context.snapshot_state",
+                  "StringEquals": "pending",
+                  "Next": "Wait1Minute"
+                },
+                {
+                  "Variable": "$.context.snapshot_state",
+                  "StringEquals": "unknown",
+                  "Next": "Done"
+                },
+                {
+                  "Variable": "$.context.snapshot_state",
+                  "StringEquals": "error",
+                  "Next": "Done"
+                }
+              ]
+            },
+            "Wait1Minute": {
+              "Type": "Wait",
+              "Seconds": 60,
+              "Next": "GetEBSSnapState"
+            },
+            "ModifyEBSVol": {
+              "Type": "Task",
+              "Resource": "${ModifyEBSVol.Arn}",
+              "ResultPath": "$.context",
+              "Next": "Done"
+            },
+            "Done": {
+              "Type": "Pass",
+              "End": true
+            }
+          }
+        }
+      RoleArn: !GetAtt 'StateMachineRole.Arn'
+
+  CreateEBSSnap:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          
+          def lambda_handler(event, lambda_context):
+              """This function creates a EBS snapshot for a given pair of ids: instance
+              id (EC2) and volume id (EBS).
+            
+              The funcion validates that the volume id is attached to instance id before
+              creating the snapshot, and returns the result via. the context object:
+            
+                result = 'ok' means that the EBS snapshot was kickstarted;
+                result = 'error' otherwise.
+            
+              Due to the asynchrnous nature of the snapshot process, this funcion is
+              meant to be combined with GetEBSSnapState (below).
+              """
+              # print("event: {}".format(str(event)))
+          
+              context=event['context']
+              instance_id = context['instance_id']
+              volume_id = context['volume_id']
+              snapshot_id = -1
+              result = 'error' # default state
+          
+              client = boto3.client('ec2')
+              response = client.describe_instances(
+                  InstanceIds=[instance_id],
+                  DryRun=False
+              )
+              
+              # Verify volume attachment.
+              reservation = response['Reservations'][0]
+              instance = reservation['Instances'][0]
+              attached = False
+
+              for item in instance['BlockDeviceMappings']:
+                  if item['Ebs']['VolumeId'] == volume_id:
+                      attached = True
+          
+              if attached == True:
+                  response = client.create_snapshot(
+                      Description='Rescale IOPs snapshot',
+                      VolumeId=volume_id,
+                      DryRun=False
+                  )
+                  
+                  # Success.
+                  snapshot_id = response['SnapshotId']
+                  result='ok'
+              
+              context['snapshot_id'] = snapshot_id
+              context['result'] = result
+          
+              return context
+      Handler: 'index.lambda_handler'
+      Role: !GetAtt 'LambdaRole.Arn'
+      Runtime: 'python3.7'
+
+  GetEBSSnapState:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+           
+          def lambda_handler(event, lambda_context):
+              """This function checks the status of a given EBS snapshot id (provided
+              by CreateEBSSnap). Because of the async nature of the snapshot process,
+              the function iterates over the loop_count variable of the step functions
+              state machine, enforcing the context['max_loops'] parameter.
+              
+                result = 'ok' means that the snapshot is complete;
+                result = 'pending' means that the snapshot is yet to be completed;
+                result = 'error' means that the snapshot creatin failed;
+                result = 'unkwnown' means that the snapshot state is unknown, because we
+                reached the maximum amount of poll loops (i.e. context['max_loops']).
+              """
+              # print("event: {}".format(str(event)))
+           
+              context=event['context']
+              snapshot_id = context['snapshot_id']
+           
+              context['loop_count'] += 1
+              result = 'error' # default state
+           
+              if context['loop_count'] <= context['max_loops']:
+                  client = boto3.client('ec2')
+                  response = client.describe_snapshots(
+                      SnapshotIds=[snapshot_id],
+                      DryRun=False
+                  )
+           
+                  snapshots = response['Snapshots']
+                  if snapshots[0]['State'] == 'completed':
+                      snapshot_state='completed'
+                      result='ok'
+                  elif snapshots[0]['State'] == 'pending':
+                      snapshot_state='pending'
+                      result='ok'
+                  else:
+                      snapshot_state='error'
+                      result='error'
+              else:
+                  snapshot_state='unknown'
+                  result='ok'
+           
+              context['snapshot_state'] = snapshot_state
+              context['result'] = result
+           
+              return context 
+      Handler: 'index.lambda_handler'
+      Role: !GetAtt 'LambdaRole.Arn'
+      Runtime: 'python3.7'
+
+  ModifyEBSVol:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          
+          def lambda_handler(event, lambda_context):
+              """Modify a EBS volume. This function is used to kickstart the
+              modification of the volume to a given type and (optionally) IOPs capacity.
+              """
+              # print("event: {}".format(str(event)))
+          
+              context=event['context']
+              result = 'error' # default state
+              
+              modify_args = {
+                  'VolumeId': context['volume_id'],
+                  'VolumeType': context['volume_type'],
+                  'DryRun': False
+              }
+              
+              if modify_args['VolumeType'] in ['io1', 'io2']:
+                  if context['volume_iops'] != '':
+                      modify_args['Iops'] = int(context['volume_iops'])
+
+              client = boto3.client('ec2')
+              response = client.modify_volume(**modify_args)
+              # print("modify_volume: {}".format(response))
+              
+              vmod = response['VolumeModification']
+              if vmod['ModificationState'] in ['completed', 'modifying', 'optimizing']:
+                  result = 'ok'
+              
+              context['result'] = result
+              return context
+      Handler: 'index.lambda_handler'
+      Role: !GetAtt 'LambdaRole.Arn'
+      Runtime: 'python3.7'
+
+  # IAM role for the RescaleEBSIOPs state machine.
+  StateMachineRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: !Sub 'states.${AWS::Region}.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Policies:
+      - PolicyName: lambda
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: 'lambda:InvokeFunction'
+            Resource:
+            - !GetAtt 'CreateEBSSnap.Arn'
+            - !GetAtt 'GetEBSSnapState.Arn'
+            - !GetAtt 'ModifyEBSVol.Arn'
+
+  # IAM role: Lambda execution. This role is used to set the permissions of
+  # the lambda functions provided in this CloudFormation template.
+  LambdaRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: 'lambda.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+      - 'arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole'
+
+  # IAM inline policy: Lambda execution. This inline policy is used to set the
+  # permissions of the lambda functions provided in this template (via inlining
+  # to LambdaRole, above).
+  LambdaInlinePolicy:
+    Type: AWS::IAM::Policy
+    Properties: 
+      PolicyName: 'RescaleEBSPolicy'
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action: 
+          - 'ec2:DescribeInstances'
+          - 'ec2:DescribeSnapshots'
+          - 'ec2:DescribeVolumes'
+          - 'ec2:ModifyVolume'
+          Resource: '*'
+        - Effect: Allow
+          Action: 
+          - 'ec2:CreateSnapshot'
+          Resource:
+          - 'arn:aws:ec2:*:*:instance/*'
+          - 'arn:aws:ec2:*:*:snapshot/*'
+          - 'arn:aws:ec2:*:*:volume/*'
+      Roles:
+        - !Ref LambdaRole
