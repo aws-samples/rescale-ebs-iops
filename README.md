@@ -2,7 +2,7 @@
 
 This code sample is discussed in detail in this AWS [blog post](https://aws.amazon.com/es/blogs/aws-spanish/).
 
-### Usage
+## Usage
 
 #### Pre-requisites
 
@@ -17,10 +17,10 @@ This code sample is discussed in detail in this AWS [blog post](https://aws.amaz
 2 - Proceed with the following commands in the terminal.
 
 ```
-aws cloudformation create-stack  --stack-name RescaleEBSIOPs --template-body file://rescale-ebs-iops.yaml
+aws cloudformation create-stack --stack-name RescaleEBSIOPs --template-body file://rescale-ebs-iops.yaml
 ```
 
-3 - Validate the deployment: refer to this [blog Post](https://aws.amazon.com/es/blogs/aws-spanish/) for further instructions.
+3 - Validate the deployment: refer to this [blog post](https://aws.amazon.com/es/blogs/aws-spanish/) for further instructions.
 
 #### Cleanup
 
@@ -29,7 +29,7 @@ In order to delete all the components deployed within this solution and so avoid
 1 - Run the following commands in your terminal:
 
 ```
-aws cloudformation delete-stack  --stack-name RescaleEBSIOPs
+aws cloudformation delete-stack --stack-name RescaleEBSIOPs
 ```
 
 2 - (Optional) Open the EC2 console and identify/delete unnecessary EBS snapshots created by this solution (they are tagged as 'Rescale IOPs snapshot').
