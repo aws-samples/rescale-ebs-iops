@@ -1,13 +1,13 @@
 # Rescaling EBS volumes programmatically
 
-This code sample is discussed in detail in this AWS [Blog Post](https://aws.amazon.com/es/blogs/aws-spanish/).
+This code sample is discussed in detail in this AWS [blog post](https://aws.amazon.com/es/blogs/aws-spanish/).
 
 ### Usage
 
 #### Pre-requisites
 
 - An AWS Account.
-- An EB2 volume attached to an EC2 instance.
+- An EBS volume attached to an EC2 instance.
 - IAM Privileges to deploy the components of this solution.
 
 #### Deployment
@@ -20,7 +20,7 @@ This code sample is discussed in detail in this AWS [Blog Post](https://aws.amaz
 aws cloudformation create-stack  --stack-name RescaleEBSIOPs --template-body file://rescale-ebs-iops.yaml
 ```
 
-3 - Validate the deployment.
+3 - Validate the deployment: refer to this [blog Post](https://aws.amazon.com/es/blogs/aws-spanish/) for further instructions.
 
 #### Cleanup
 
