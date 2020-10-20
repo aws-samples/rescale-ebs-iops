@@ -17,7 +17,7 @@ This code sample is discussed in detail in this AWS [blog post](https://aws.amaz
 2 - Proceed with the following commands in the terminal.
 
 ```
-aws cloudformation create-stack --stack-name RescaleEBSIOPs --template-body file://rescale-ebs-iops.yaml
+aws cloudformation create-stack --stack-name RescaleEBSIOPs --template-body file://rescale-ebs-iops.yaml --capabilities CAPABILITY_IAM
 ```
 
 3 - Validate the deployment: refer to this [blog post](https://aws.amazon.com/es/blogs/aws-spanish/) for further instructions.
