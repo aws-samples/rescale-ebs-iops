@@ -1,6 +1,6 @@
 # Rescaling EBS volumes programmatically
 
-This code sample is discussed in detail in this AWS [blog post](https://aws.amazon.com/es/blogs/aws-spanish/).
+This code sample is discussed in detail in this AWS [blog post](https://aws.amazon.com/es/blogs/aws-spanish/administrando-la-capacidad-de-entrada-salida-de-volumenes-ebs-de-manera-programatica/).
 
 ## Usage
 
